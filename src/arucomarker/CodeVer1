@@ -1,0 +1,102 @@
+import cv2
+import numpy as np
+import time
+
+def detect_markers_and_estimate_pose(frame, detector, camera_matrix, dist_coeffs, marker_size):
+    """
+    ArUco 마커를 검출하고 3D 포즈를 추정하는 함수.
+    """
+    corners, ids, _ = detector.detectMarkers(frame)
+
+    if ids is not None:
+        cv2.aruco.drawDetectedMarkers(frame, corners, ids)
+        rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
+            corners, marker_size, camera_matrix, dist_coeffs
+        )
+        return corners, ids, rvecs, tvecs
+
+    return None, None, None, None
+
+def display_marker_info(frame, corners, ids, rvecs, tvecs, camera_matrix, dist_coeffs, marker_size):
+    """
+    검출된 ArUco 마커의 ID, 3D 좌표 및 회전 각도를 화면에 출력하는 함수.
+    """
+    for i in range(len(ids)):
+        corner = corners[i][0]
+        center_x = int(np.mean(corner[:, 0]))
+        center_y = int(np.mean(corner[:, 1]))
+
+        pos_x, pos_y, pos_z = tvecs[i][0]
+
+        rot_matrix, _ = cv2.Rodrigues(rvecs[i])
+        euler_angles = cv2.RQDecomp3x3(rot_matrix)[0]
+
+        cv2.drawFrameAxes(frame, camera_matrix, dist_coeffs, rvecs[i], tvecs[i], marker_size / 2)
+
+        cv2.putText(frame, f"ID: {ids[i][0]}", (center_x, center_y - 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
+
+        cv2.putText(frame, f"Pos: ({pos_x:.2f}, {pos_y:.2f}, {pos_z:.2f})m", 
+                    (center_x, center_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
+
+        cv2.putText(frame, f"Rot: ({euler_angles[0]:.1f}, {euler_angles[1]:.1f}, {euler_angles[2]:.1f})deg",
+                    (center_x, center_y + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
+
+def live_aruco_detection():
+    """
+    실시간 ArUco 마커 검출 및 포즈 추정 실행.
+    """
+    # ✅ 카메라 내부 행렬(K) 직접 설정
+    camera_matrix = np.array([
+        [519.5989379882812, 0, 645.4970092773438],
+        [0, 519.5989379882812, 364.4530944824219],
+        [0, 0, 1]
+    ], dtype=np.float32)
+
+    # ✅ 왜곡 계수(D) 직접 설정
+    dist_coeffs = np.zeros((1, 12), dtype=np.float32)  # 12개 계수, 0으로 설정
+
+    # ArUco 검출기 설정
+    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_250)
+    aruco_params = cv2.aruco.DetectorParameters()
+    detector = cv2.aruco.ArucoDetector(aruco_dict, aruco_params)
+
+    marker_size = 0.05  # 5cm
+
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("Error: Could not open camera.")
+        return
+
+    time.sleep(2)
+
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("Error: Failed to grab frame.")
+            break
+
+        frame_undistorted = cv2.undistort(frame, camera_matrix, dist_coeffs)
+
+        corners, ids, rvecs, tvecs = detect_markers_and_estimate_pose(
+            frame_undistorted, detector, camera_matrix, dist_coeffs, marker_size
+        )
+
+        if ids is not None:
+            display_marker_info(frame_undistorted, corners, ids, rvecs, tvecs, camera_matrix, dist_coeffs, marker_size)
+
+        cv2.imshow('ArUco Marker Detection', frame_undistorted)
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    print("Starting ArUco marker detection...")
+    live_aruco_detection()
+
